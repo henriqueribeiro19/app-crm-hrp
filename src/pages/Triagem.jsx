@@ -1,337 +1,542 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-
-function iniciais(nome = '') {
-  return nome.split(' ').slice(0, 2).map(p => p[0]).join('').toUpperCase()
-}
-function limparTelefone(tel = '') {
-  return tel.split(/[\/,]/)[0].trim()
-}
-function linkWhatsApp(tel = '') {
-  const num = tel.replace(/\D/g, '')
-  return `https://wa.me/${num.startsWith('55') ? num : '55' + num}`
-}
-
-function ModalEditar({ lead, onSalvar, onFechar }) {
-  const [form, setForm] = useState({
-    nome:             lead.nome             ?? '',
-    nome_fantasia:    lead.nome_fantasia    ?? '',
-    telefone:         limparTelefone(lead.telefone ?? ''),
-    email:            lead.email            ?? '',
-    segmento:         lead.segmento         ?? '',
-    municipio:        lead.municipio        ?? '',
-    bairro:           lead.bairro           ?? '',
-    produto_sugerido: lead.produto_sugerido ?? 'qualificar',
-    observacoes:      '',
-  })
-
-  const campo = (label, key, type = 'text') => (
-    <div>
-      <label className="block text-xs font-medium text-gray-400 mb-1.5">{label}</label>
-      <input type={type} value={form[key]}
-        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-        className="input-field text-sm" />
-    </div>
-  )
-
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onFechar}>
-      <div className="bg-[#1a2035] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md p-6"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-white">Editar lead</h2>
-          <button onClick={onFechar} className="text-gray-600 hover:text-gray-300">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="flex flex-col gap-3">
-          {campo('Nome da empresa', 'nome')}
-          {campo('Nome fantasia', 'nome_fantasia')}
-          {campo('Telefone', 'telefone', 'tel')}
-          {campo('E-mail', 'email', 'email')}
-          {campo('Segmento', 'segmento')}
-          <div className="grid grid-cols-2 gap-3">
-            {campo('Município', 'municipio')}
-            {campo('Bairro', 'bairro')}
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1.5">Produto sugerido</label>
-            <select value={form.produto_sugerido}
-              onChange={e => setForm(f => ({ ...f, produto_sugerido: e.target.value }))}
-              className="input-field text-sm">
-              <option value="cloudfy">Cloudfy</option>
-              <option value="cplung">Cplung</option>
-              <option value="qualificar">Qualificar depois</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1.5">Observações</label>
-            <textarea value={form.observacoes} rows={3}
-              onChange={e => setForm(f => ({ ...f, observacoes: e.target.value }))}
-              placeholder="Anotações sobre este lead…"
-              className="input-field text-sm resize-none py-2" />
-          </div>
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button onClick={onFechar} className="btn-secondary flex-1 justify-center">Cancelar</button>
-          <button onClick={() => onSalvar(form)} className="btn-primary flex-1">Salvar e aprovar</button>
-        </div>
-      </div>
-    </div>
-  )
-}
+import { FiltrosAvancados } from '../components/ui/FiltrosAvancados'
+import { Paginacao } from '../components/ui/Paginacao'
+import { SkeletonTabela } from '../components/ui/SkeletonTabela'
+import { CheckCircle, XCircle, FileSpreadsheet, Upload, X, FileText, AlertTriangle } from 'lucide-react'
 
 export default function Triagem() {
-  const [leads, setLeads]             = useState([])
-  const [carregando, setCarregando]   = useState(true)
-  const [filtro, setFiltro]           = useState('pendente')
-  const [busca, setBusca]             = useState('')
-  const [editando, setEditando]       = useState(null)
-  const [processando, setProcessando] = useState({})
-  const [aviso, setAviso]             = useState('')
+  const [staging, setStaging] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [pagina, setPagina] = useState(1)
+  const [totalRegistros, setTotalRegistros] = useState(0)
+  const [totalPaginas, setTotalPaginas] = useState(1)
+  const [opcoesFiltro, setOpcoesFiltro] = useState({ status: [], segmento: [], produto: [], municipio: [] })
+  const [ordenacao, setOrdenacao] = useState({ campo: 'criado_em', direcao: 'desc' })
+  const [stats, setStats] = useState({ pendente: 0, aprovado: 0, descartado: 0 })
 
-  const carregar = async () => {
-    setCarregando(true)
-    const { data } = await supabase.from('staging_raspagem').select('*')
-      .eq('status', filtro).order('score', { ascending: false })
-      .order('criado_em', { ascending: false }).limit(100)
-    setLeads(data ?? [])
-    setCarregando(false)
-  }
+  // Importação
+  const [modalImport, setModalImport] = useState(false)
+  const [arquivo, setArquivo] = useState(null)
+  const [importando, setImportando] = useState(false)
+  const [previewData, setPreviewData] = useState([])
+  const [erroImport, setErroImport] = useState('')
 
-  useEffect(() => { carregar() }, [filtro])
-
-  const emailContador = (email = '') => /contabil|assessoria|consult|escritorio|conta/i.test(email)
-  const foraSegmento  = (seg = '') => /banco|seguros?|imobili|farmac|hospital|escola/i.test(seg)
-
-  const setProc = (id, val) => setProcessando(p => ({ ...p, [id]: val }))
-  const mostrarAviso = (msg) => { setAviso(msg); setTimeout(() => setAviso(''), 3500) }
-
-  const aprovar = async (lead, dadosEditados = null) => {
-    setProc(lead.id, 'aprovando')
-    const d = dadosEditados ?? lead
-    const { data: empresa, error } = await supabase.from('empresas').insert({
-      nome: d.nome, nome_fantasia: d.nome_fantasia, cnpj: lead.cnpj,
-      telefone: limparTelefone(d.telefone ?? ''), email: d.email,
-      segmento: d.segmento, municipio: d.municipio, bairro: d.bairro,
-      score: lead.score ?? 0, classificacao: lead.classificacao,
-      produto_sugerido: d.produto_sugerido ?? 'qualificar',
-      observacoes: d.observacoes ?? null,
-      canal_origem: 'scraping', status_funil: 'novo', metadata: lead.bruto ?? {},
-    }).select().single()
-
-    if (error) {
-      mostrarAviso(error.code === '23505' ? 'CNPJ já cadastrado como lead ativo.' : 'Erro ao aprovar. Tente novamente.')
-      setProc(lead.id, null); return
-    }
-    await supabase.from('staging_raspagem')
-      .update({ status: 'aprovado', empresa_id: empresa.id, processado_em: new Date().toISOString() })
-      .eq('id', lead.id)
-    setLeads(l => l.filter(x => x.id !== lead.id))
-    setEditando(null)
-    mostrarAviso('✓ Lead aprovado e adicionado ao funil.')
-    setProc(lead.id, null)
-  }
-
-  const descartar = async (lead) => {
-    setProc(lead.id, 'descartando')
-    await supabase.from('staging_raspagem')
-      .update({ status: 'descartado', motivo_descarte: 'descartado manualmente', processado_em: new Date().toISOString() })
-      .eq('id', lead.id)
-    setLeads(l => l.filter(x => x.id !== lead.id))
-    setProc(lead.id, null)
-  }
-
-  const alterarProduto = (id, produto) =>
-    setLeads(l => l.map(x => x.id === id ? { ...x, produto_sugerido: produto } : x))
-
-  const filtrados = leads.filter(l => {
-    const q = busca.toLowerCase()
-    return !busca || l.nome?.toLowerCase().includes(q) || l.nome_fantasia?.toLowerCase().includes(q)
-      || l.municipio?.toLowerCase().includes(q) || l.cnpj?.includes(q)
+  const [filtros, setFiltros] = useState({
+    busca: '',
+    segmento: '',
+    municipio: '',
+    status: 'pendente',
+    produto_sugerido: '',
+    classificacao: '',
+    porte: '',
+    scoreMin: 0,
+    scoreMax: 100,
   })
 
-  const alertas = filtrados.filter(l => emailContador(l.email) || foraSegmento(l.segmento))
+  const ITENS_POR_PAGINA = 20
 
-  const abas = [
-    { val: 'pendente',   label: 'Aguardando' },
-    { val: 'aprovado',   label: 'Aprovados'  },
-    { val: 'descartado', label: 'Descartados'},
-  ]
+  const carregarDados = useCallback(async () => {
+    setCarregando(true)
+    try {
+      let query = supabase
+        .from('staging_raspagem')
+        .select('*', { count: 'exact' })
+
+      if (filtros.busca) {
+        query = query.or(`nome.ilike.%${filtros.busca}%,cnpj.ilike.%${filtros.busca}%`)
+      }
+      if (filtros.segmento) query = query.eq('segmento', filtros.segmento)
+      if (filtros.municipio) query = query.ilike('municipio', `%${filtros.municipio}%`)
+      if (filtros.status) query = query.eq('status', filtros.status)
+      if (filtros.produto_sugerido) query = query.eq('produto_sugerido', filtros.produto_sugerido)
+      if (filtros.classificacao) query = query.eq('classificacao', filtros.classificacao)
+      if (filtros.scoreMin > 0) query = query.gte('score', filtros.scoreMin)
+      if (filtros.scoreMax < 100) query = query.lte('score', filtros.scoreMax)
+
+      query = query.order(ordenacao.campo, { ascending: ordenacao.direcao === 'asc' })
+
+      const from = (pagina - 1) * ITENS_POR_PAGINA
+      const to = from + ITENS_POR_PAGINA - 1
+      query = query.range(from, to)
+
+      const { data, error, count } = await query
+      if (error) throw error
+
+      setStaging(data || [])
+      setTotalRegistros(count || 0)
+      setTotalPaginas(Math.ceil((count || 0) / ITENS_POR_PAGINA))
+
+      // Stats
+      const { data: allData } = await supabase.from('staging_raspagem').select('status')
+      const s = { pendente: 0, aprovado: 0, descartado: 0 }
+      allData?.forEach(d => { if (s[d.status] !== undefined) s[d.status]++ })
+      setStats(s)
+
+      // Opções
+      const { data: opts } = await supabase.from('staging_raspagem').select('segmento, municipio, status, produto_sugerido')
+      setOpcoesFiltro({
+        status: ['pendente', 'aprovado', 'descartado'],
+        segmento: [...new Set(opts?.map(e => e.segmento).filter(Boolean) || [])],
+        produto: [...new Set(opts?.map(e => e.produto_sugerido).filter(Boolean) || [])],
+        municipio: [...new Set(opts?.map(e => e.municipio).filter(Boolean) || [])].sort(),
+      })
+    } catch (err) {
+      console.error('Erro:', err)
+    } finally {
+      setCarregando(false)
+    }
+  }, [filtros, pagina, ordenacao])
+
+  useEffect(() => { carregarDados() }, [carregarDados])
+  useEffect(() => { setPagina(1) }, [filtros])
+
+  const aprovarLead = async (id) => {
+    const { data: lead } = await supabase.from('staging_raspagem').select('*').eq('id', id).single()
+    if (!lead) return
+
+    const { data: empresa } = await supabase.from('empresas').insert({
+      nome: lead.nome,
+      nome_fantasia: lead.nome,
+      cnpj: lead.cnpj,
+      telefone: lead.telefone,
+      email: lead.email,
+      segmento: lead.segmento,
+      municipio: lead.municipio,
+      bairro: lead.bairro,
+      score: lead.score,
+      classificacao: lead.classificacao,
+      produto_sugerido: lead.produto_sugerido,
+      canal_origem: 'scraping',
+      status_funil: 'novo',
+    }).select().single()
+
+    await supabase.from('staging_raspagem').update({
+      status: 'aprovado',
+      empresa_id: empresa?.id,
+      processado_em: new Date().toISOString(),
+    }).eq('id', id)
+
+    carregarDados()
+  }
+
+  const descartarLead = async (id, motivo = '') => {
+    await supabase.from('staging_raspagem').update({
+      status: 'descartado',
+      motivo_descarte: motivo || 'Descartado manualmente',
+      processado_em: new Date().toISOString(),
+    }).eq('id', id)
+    carregarDados()
+  }
+
+  // Importação de arquivo
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    setErroImport('')
+    const ext = file.name.split('.').pop().toLowerCase()
+
+    if (ext !== 'csv' && ext !== 'xlsx' && ext !== 'xls') {
+      setErroImport('Formato não suportado. Use CSV ou Excel (.xlsx/.xls)')
+      return
+    }
+
+    setArquivo(file)
+
+    if (ext === 'csv') {
+      parseCSV(file)
+    } else {
+      // Excel - tenta usar xlsx.js se disponível
+      try {
+        const XLSX = await import('xlsx')
+        const data = await file.arrayBuffer()
+        const workbook = XLSX.read(data, { type: 'array' })
+        const sheet = workbook.Sheets[workbook.SheetNames[0]]
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+
+        if (json.length < 2) {
+          setErroImport('Arquivo Excel vazio ou sem dados')
+          return
+        }
+
+        const headers = json[0].map(h => String(h).toLowerCase().trim())
+        const rows = json.slice(1).map(row => {
+          const obj = {}
+          headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]).trim() : '' })
+          return obj
+        }).filter(r => r.nome || r.razao_social || r.cnpj || r['razão social'])
+
+        setPreviewData(rows.slice(0, 5))
+      } catch (err) {
+        setErroImport('Erro ao ler Excel. Instale a biblioteca: npm install xlsx')
+        console.error(err)
+      }
+    }
+  }
+
+  const parseCSV = (file) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target.result
+      const lines = text.split('\n').filter(l => l.trim())
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+
+      const rows = lines.slice(1).map(line => {
+        const values = line.split(',').map(v => v.trim())
+        const obj = {}
+        headers.forEach((h, i) => { obj[h] = values[i] || '' })
+        return obj
+      }).filter(r => r.nome || r.razao_social || r.cnpj || r['razão social'])
+
+      setPreviewData(rows.slice(0, 5))
+    }
+    reader.readAsText(file)
+  }
+
+  const importarLeads = async () => {
+    if (!arquivo || previewData.length === 0) return
+    setImportando(true)
+    setErroImport('')
+
+    try {
+      let leadsToInsert = []
+      const ext = arquivo.name.split('.').pop().toLowerCase()
+
+      if (ext === 'csv') {
+        const text = await arquivo.text()
+        const lines = text.split('\n').filter(l => l.trim())
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+
+        leadsToInsert = lines.slice(1).map(line => {
+          const values = line.split(',').map(v => v.trim())
+          const obj = {}
+          headers.forEach((h, i) => { obj[h] = values[i] || '' })
+          return obj
+        })
+      } else {
+        // Excel
+        const XLSX = await import('xlsx')
+        const data = await arquivo.arrayBuffer()
+        const workbook = XLSX.read(data, { type: 'array' })
+        const sheet = workbook.Sheets[workbook.SheetNames[0]]
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+
+        const headers = json[0].map(h => String(h).toLowerCase().trim())
+        leadsToInsert = json.slice(1).map(row => {
+          const obj = {}
+          headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]).trim() : '' })
+          return obj
+        })
+      }
+
+      const leadsMapped = leadsToInsert
+        .filter(l => l.nome || l.razao_social || l['razão social'] || l.cnpj)
+        .map(l => ({
+          fonte: 'upload_' + ext,
+          bruto: l,
+          nome: l.nome || l.razao_social || l['razão social'] || 'Sem nome',
+          cnpj: l.cnpj || '',
+          telefone: l.telefone || l.celular || l.whatsapp || '',
+          email: l.email || '',
+          segmento: l.segmento || l.categoria || '',
+          municipio: l.municipio || l.cidade || '',
+          bairro: l.bairro || '',
+          score: parseInt(l.score) || 50,
+          classificacao: l.classificacao || l.classificação || '',
+          produto_sugerido: l.produto_sugerido || l.produto || 'qualificar',
+          status: 'pendente',
+        }))
+
+      if (leadsMapped.length === 0) {
+        setErroImport('Nenhum lead válido encontrado no arquivo')
+        setImportando(false)
+        return
+      }
+
+      const { error } = await supabase.from('staging_raspagem').insert(leadsMapped)
+
+      if (error) throw error
+
+      alert(`${leadsMapped.length} leads importados com sucesso!`)
+      setModalImport(false)
+      setArquivo(null)
+      setPreviewData([])
+      carregarDados()
+    } catch (err) {
+      setErroImport('Erro na importação: ' + err.message)
+    } finally {
+      setImportando(false)
+    }
+  }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-100">Triagem</h1>
+          <p className="text-sm text-gray-400 mt-1">Aprove ou descarte leads do scraping</p>
+        </div>
+        <button 
+          onClick={() => setModalImport(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-accent text-black rounded-lg text-sm font-medium hover:bg-accent/90 transition-colors self-start sm:self-auto"
+        >
+          <Upload size={16} />
+          Importar Planilha
+        </button>
+      </div>
 
-      {/* Topbar */}
-      <header className="h-12 flex items-center gap-3 px-5 border-b border-white/5 bg-surface-sidebar shrink-0">
-        <h1 className="text-sm font-semibold text-white flex-1">Triagem de leads</h1>
-        <input type="search" placeholder="Buscar por nome, CNPJ, cidade…" value={busca}
-          onChange={e => setBusca(e.target.value)} className="input-field max-w-xs h-8 text-xs" />
-      </header>
-
-      {/* Abas */}
-      <div className="flex gap-0 border-b border-white/5 bg-surface-sidebar px-5 shrink-0">
-        {abas.map(({ val, label }) => (
-          <button key={val} onClick={() => setFiltro(val)}
-            className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors
-              ${filtro === val ? 'border-accent text-accent' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-            {label}
-          </button>
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        {[
+          { label: 'Pendentes', valor: stats.pendente, cor: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+          { label: 'Aprovados', valor: stats.aprovado, cor: 'text-green-400', bg: 'bg-green-500/10' },
+          { label: 'Descartados', valor: stats.descartado, cor: 'text-red-400', bg: 'bg-red-500/10' },
+        ].map(({ label, valor, cor, bg }) => (
+          <div key={label} className="bg-surface-card border border-white/[0.08] rounded-xl p-4 text-center hover:border-white/[0.12] transition-colors">
+            <div className={`text-2xl font-bold ${cor}`}>{valor}</div>
+            <div className="text-xs text-gray-500 mt-1">{label}</div>
+          </div>
         ))}
       </div>
 
-      {/* Conteúdo */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      {/* Filtros */}
+      <FiltrosAvancados
+        filtros={filtros}
+        onFiltrosChange={setFiltros}
+        opcoes={opcoesFiltro}
+      />
 
-        {/* Toast */}
-        {aviso && (
-          <div className={`mb-3 flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium
-            ${aviso.startsWith('✓') ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-                                    : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'}`}>
-            {aviso}
+      {/* Tabela */}
+      {carregando ? (
+        <SkeletonTabela />
+      ) : (
+        <>
+          <div className="bg-surface-card border border-white/[0.08] rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-surface border-b border-white/[0.08]">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Empresa</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Segmento</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Cidade</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Score</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Classif.</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Produto</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.04]">
+                  {staging.map(lead => (
+                    <tr key={lead.id} className="hover:bg-surface-hover/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-100">{lead.nome || '—'}</div>
+                        <div className="text-xs text-gray-500 font-mono">{lead.cnpj || '—'}</div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-300">{lead.segmento || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-400">{lead.municipio || '—'}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-2 rounded-full bg-surface overflow-hidden">
+                            <div className="h-full rounded-full bg-gradient-to-r from-accent to-emerald-400" style={{ width: `${lead.score}%` }} />
+                          </div>
+                          <span className="text-sm font-semibold text-gray-200">{lead.score}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                          lead.classificacao === 'A' ? 'bg-green-500/20 text-green-300' :
+                          lead.classificacao === 'B' ? 'bg-yellow-500/20 text-yellow-300' :
+                          'bg-red-500/20 text-red-300'
+                        }`}>
+                          {lead.classificacao || '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-sm font-medium capitalize ${
+                          lead.produto_sugerido === 'cloudfy' ? 'text-purple-400' :
+                          lead.produto_sugerido === 'cplung' ? 'text-teal-400' :
+                          'text-gray-400'
+                        }`}>
+                          {lead.produto_sugerido || '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          {lead.status === 'pendente' && (
+                            <>
+                              <button
+                                onClick={() => aprovarLead(lead.id)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-green-500/20 text-green-300 hover:bg-green-500/30 transition-colors"
+                              >
+                                <CheckCircle size={14} />
+                                Aprovar
+                              </button>
+                              <button
+                                onClick={() => descartarLead(lead.id)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors"
+                              >
+                                <XCircle size={14} />
+                                Descartar
+                              </button>
+                            </>
+                          )}
+                          {lead.status === 'aprovado' && (
+                            <span className="flex items-center gap-1 text-xs text-green-400">
+                              <CheckCircle size={14} /> Aprovado
+                            </span>
+                          )}
+                          {lead.status === 'descartado' && (
+                            <span className="flex items-center gap-1 text-xs text-red-400">
+                              <XCircle size={14} /> Descartado
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {staging.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+                <FileSpreadsheet size={48} className="mb-3 opacity-30" />
+                <p className="text-lg font-medium">Nenhum lead na triagem</p>
+                <p className="text-sm">Importe uma planilha para começar.</p>
+              </div>
+            )}
           </div>
-        )}
+          <Paginacao
+            pagina={pagina}
+            totalPaginas={totalPaginas}
+            totalRegistros={totalRegistros}
+            onPaginaChange={setPagina}
+            itensPorPagina={ITENS_POR_PAGINA}
+          />
+        </>
+      )}
 
-        {/* Alertas */}
-        {filtro === 'pendente' && alertas.length > 0 && (
-          <div className="mb-3 flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2.5">
-            <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-            <span className="text-xs text-amber-400">
-              {alertas.length} lead{alertas.length > 1 ? 's' : ''} com atenção — e-mail de contador ou fora do segmento.
-            </span>
-          </div>
-        )}
-
-        <p className="text-xs text-gray-600 mb-3">
-          {carregando ? 'Carregando…' : `${filtrados.length} lead${filtrados.length !== 1 ? 's' : ''}`}
-        </p>
-
-        {carregando ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : filtrados.length === 0 ? (
-          <div className="card px-5 py-12 text-center">
-            <p className="text-sm text-gray-500">
-              {filtro === 'pendente' ? 'Nenhum lead aguardando triagem.'
-               : filtro === 'aprovado' ? 'Nenhum lead aprovado ainda.'
-               : 'Nenhum lead descartado.'}
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {filtrados.map(lead => {
-              const temAlerta = emailContador(lead.email) || foraSegmento(lead.segmento)
-              const proc = processando[lead.id]
-              const tel  = limparTelefone(lead.telefone ?? '')
-
-              return (
-                <div key={lead.id}
-                  className={`card flex items-center gap-3 px-4 py-3 transition-all
-                    ${temAlerta ? 'border-amber-500/30 bg-amber-500/5' : ''}
-                    ${proc ? 'opacity-60' : ''}`}>
-
-                  {/* Avatar */}
-                  <div className="w-9 h-9 rounded-lg bg-accent/10 text-accent flex items-center justify-center text-xs font-semibold shrink-0">
-                    {iniciais(lead.nome_fantasia || lead.nome || '?')}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium text-white truncate">
-                        {lead.nome_fantasia || lead.nome}
-                      </p>
-                      {temAlerta && (
-                        <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full shrink-0">verificar</span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 truncate">
-                      {[lead.segmento, lead.bairro, lead.municipio].filter(Boolean).join(' · ')}
-                      {lead.cnpj && <span className="ml-2 font-mono text-gray-600">{lead.cnpj}</span>}
-                    </p>
-                    {lead.email && (
-                      <p className={`text-xs truncate ${emailContador(lead.email) ? 'text-amber-500' : 'text-gray-600'}`}>
-                        {lead.email}{emailContador(lead.email) && ' — pode ser contador'}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Score */}
-                  <div className="hidden sm:flex flex-col items-center shrink-0 w-10">
-                    <span className="text-sm font-semibold text-white">{lead.score ?? '—'}</span>
-                    <span className="text-[10px] text-gray-500">{lead.classificacao ?? ''}</span>
-                  </div>
-
-                  {/* Produto */}
-                  {filtro === 'pendente' ? (
-                    <select value={lead.produto_sugerido ?? 'qualificar'}
-                      onChange={e => alterarProduto(lead.id, e.target.value)}
-                      onClick={e => e.stopPropagation()}
-                      className="text-xs border border-white/10 rounded-full px-2 py-0.5 bg-white/5 text-gray-300 cursor-pointer focus:outline-none focus:border-accent/40 shrink-0">
-                      <option value="cloudfy">Cloudfy</option>
-                      <option value="cplung">Cplung</option>
-                      <option value="qualificar">Qualificar</option>
-                    </select>
-                  ) : (
-                    <span className={lead.produto_sugerido === 'cloudfy' ? 'badge-cloudfy' : lead.produto_sugerido === 'cplung' ? 'badge-cplung' : 'text-xs text-gray-500'}>
-                      {lead.produto_sugerido === 'cloudfy' ? 'Cloudfy' : lead.produto_sugerido === 'cplung' ? 'Cplung' : 'Qualificar'}
-                    </span>
-                  )}
-
-                  {/* WhatsApp */}
-                  {tel && filtro === 'pendente' && (
-                    <a href={linkWhatsApp(tel)} target="_blank" rel="noreferrer"
-                      className="btn-whatsapp shrink-0 hidden md:inline-flex">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
-                        <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.135 1.528 5.887L.057 23.882a.5.5 0 00.61.61l6.044-1.461A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.799 9.799 0 01-5.001-1.37l-.36-.213-3.714.898.935-3.62-.234-.373A9.818 9.818 0 012.182 12C2.182 6.57 6.57 2.182 12 2.182S21.818 6.57 21.818 12 17.43 21.818 12 21.818z"/>
-                      </svg>
-                    </a>
-                  )}
-
-                  {/* Ações */}
-                  {filtro === 'pendente' && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={() => setEditando(lead)} disabled={!!proc} className="btn-secondary">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                        Editar
-                      </button>
-                      <button onClick={() => aprovar(lead)} disabled={!!proc}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors">
-                        {proc === 'aprovando'
-                          ? <span className="w-3 h-3 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
-                          : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>}
-                        Aprovar
-                      </button>
-                      <button onClick={() => descartar(lead)} disabled={!!proc}
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-white/10 text-gray-600 hover:border-red-500/30 hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                        {proc === 'descartando'
-                          ? <span className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
-                          : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>}
-                      </button>
-                    </div>
-                  )}
+      {/* Modal: Importar Planilha */}
+      {modalImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-surface-card border border-white/[0.08] rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center">
+                  <FileSpreadsheet size={20} className="text-accent" />
                 </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-100">Importar Planilha</h3>
+                  <p className="text-sm text-gray-400">CSV ou Excel (.xlsx, .xls)</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => { setModalImport(false); setArquivo(null); setPreviewData([]); setErroImport('') }}
+                className="p-2 rounded-lg hover:bg-white/5 text-gray-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
 
-      {editando && (
-        <ModalEditar lead={editando} onFechar={() => setEditando(null)}
-          onSalvar={(dados) => aprovar(editando, dados)} />
+            <div className="space-y-4">
+              {/* Upload */}
+              <div 
+                className="border-2 border-dashed border-white/[0.08] rounded-xl p-8 text-center hover:border-accent/30 transition-colors cursor-pointer"
+                onClick={() => document.getElementById('file-upload-triagem').click()}
+              >
+                <input 
+                  id="file-upload-triagem" 
+                  type="file" 
+                  accept=".csv,.xlsx,.xls" 
+                  className="hidden" 
+                  onChange={handleFileChange}
+                />
+                <Upload size={32} className="mx-auto mb-3 text-gray-500" />
+                <p className="text-sm text-gray-300 font-medium">
+                  {arquivo ? arquivo.name : 'Clique para selecionar arquivo'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {arquivo ? `${(arquivo.size / 1024).toFixed(1)} KB` : 'CSV ou Excel (.csv, .xlsx, .xls)'}
+                </p>
+              </div>
+
+              {/* Erro */}
+              {erroImport && (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  <AlertTriangle size={16} />
+                  {erroImport}
+                </div>
+              )}
+
+              {/* Preview */}
+              {previewData.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-400 mb-2">Preview ({previewData.length} primeiros registros):</p>
+                  <div className="bg-surface border border-white/[0.08] rounded-lg overflow-x-auto max-h-48">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-white/[0.08]">
+                          <th className="px-3 py-2 text-left text-gray-400">Nome</th>
+                          <th className="px-3 py-2 text-left text-gray-400">CNPJ</th>
+                          <th className="px-3 py-2 text-left text-gray-400">Cidade</th>
+                          <th className="px-3 py-2 text-left text-gray-400">Score</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewData.map((row, i) => (
+                          <tr key={i} className="border-b border-white/[0.04]">
+                            <td className="px-3 py-2 text-gray-300 truncate max-w-[150px]">{row.nome || row.razao_social || row['razão social'] || '—'}</td>
+                            <td className="px-3 py-2 text-gray-400 font-mono">{row.cnpj || '—'}</td>
+                            <td className="px-3 py-2 text-gray-400">{row.municipio || row.cidade || '—'}</td>
+                            <td className="px-3 py-2 text-gray-400">{row.score || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Info */}
+              <div className="bg-surface/50 border border-white/[0.06] rounded-lg p-3">
+                <p className="text-xs text-gray-500">
+                  <strong className="text-gray-400">Colunas esperadas:</strong> nome, cnpj, telefone, email, segmento, municipio, bairro, score, classificacao, produto_sugerido
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Os leads serão enviados para <strong className="text-accent">Triagem</strong> para aprovação.
+                </p>
+              </div>
+
+              {/* Ações */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setModalImport(false); setArquivo(null); setPreviewData([]); setErroImport('') }}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={importarLeads}
+                  disabled={!arquivo || importando}
+                  className="flex-1 px-4 py-2.5 bg-accent text-black rounded-xl text-sm font-medium hover:bg-accent/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                >
+                  {importando ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                      Importando...
+                    </>
+                  ) : (
+                    <>
+                      <FileText size={16} />
+                      Importar Leads
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
