@@ -1,4 +1,4 @@
-# FoodCRM
+# APP CRM HRP
 
 CRM para gestão de leads de food service e varejo — Cloudfy e Cplung.
 
