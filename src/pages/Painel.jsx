@@ -38,7 +38,7 @@ export default function Painel() {
     scoreMax: 100,
   })
 
-  const ITENS_POR_PAGINA = 20
+  const ITENS_POR_PAGINA = 10
 
   const carregarDados = useCallback(async () => {
     setCarregando(true)

@@ -1,10 +1,10 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { Outlet } from 'react-router-dom'
-import { LayoutDashboard, Filter, GitBranch, Users, Crown, Archive, LogOut, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Filter, GitBranch, Users, Crown, Archive, LogOut, Menu, X, Shield } from 'lucide-react'
 import { useState } from 'react'
 
-const NAV = [
+const NAV_BASE = [
   { to: '/', label: 'Painel', icon: LayoutDashboard },
   { to: '/triagem', label: 'Triagem', icon: Filter },
   { to: '/funil', label: 'Funil', icon: GitBranch },
@@ -16,8 +16,13 @@ const NAV = [
 export default function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { usuario, logout } = useAuth()
+  const { usuario, perfil, isAdmin, logout } = useAuth()
   const [menuAberto, setMenuAberto] = useState(false)
+
+  // Adiciona link de admin se for admin
+  const NAV = isAdmin 
+    ? [...NAV_BASE, { to: '/admin', label: 'Admin', icon: Shield }]
+    : NAV_BASE
 
   const handleLogout = async () => {
     await logout()
@@ -57,10 +62,11 @@ export default function Layout() {
         <div className="p-4 border-t border-white/[0.06]">
           <div className="flex items-center gap-3 px-4 py-3 mb-2">
             <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-bold">
-              {usuario?.email?.[0]?.toUpperCase() || 'U'}
+              {perfil?.nome?.[0]?.toUpperCase() || usuario?.email?.[0]?.toUpperCase() || 'U'}
             </div>
             <div className="min-w-0">
-              <p className="text-sm text-gray-300 truncate">{usuario?.email || 'Usuário'}</p>
+              <p className="text-sm text-gray-300 truncate">{perfil?.nome || usuario?.email || 'Usuário'}</p>
+              {isAdmin && <p className="text-[10px] text-yellow-400">Administrador</p>}
             </div>
           </div>
           <button

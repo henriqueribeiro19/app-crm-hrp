@@ -3,7 +3,20 @@ import { supabase } from '../lib/supabase'
 import { FiltrosAvancados } from '../components/ui/FiltrosAvancados'
 import { Paginacao } from '../components/ui/Paginacao'
 import { SkeletonTabela } from '../components/ui/SkeletonTabela'
-import { CheckCircle, XCircle, FileSpreadsheet, Upload, X, FileText, AlertTriangle } from 'lucide-react'
+import { CheckCircle, XCircle, FileSpreadsheet, Upload, X, FileText, AlertTriangle, AlertCircle, Check, ChevronDown } from 'lucide-react'
+
+const CAMPOS_BANCO = [
+  { key: 'nome', label: 'Nome / Razão Social', obrigatorio: true },
+  { key: 'cnpj', label: 'CNPJ', obrigatorio: false },
+  { key: 'telefone', label: 'Telefone', obrigatorio: false },
+  { key: 'email', label: 'E-mail', obrigatorio: false },
+  { key: 'segmento', label: 'Segmento', obrigatorio: false },
+  { key: 'municipio', label: 'Município', obrigatorio: false },
+  { key: 'bairro', label: 'Bairro', obrigatorio: false },
+  { key: 'score', label: 'Score', obrigatorio: false },
+  { key: 'classificacao', label: 'Classificação', obrigatorio: false },
+  { key: 'produto_sugerido', label: 'Produto Sugerido', obrigatorio: false },
+]
 
 export default function Triagem() {
   const [staging, setStaging] = useState([])
@@ -15,11 +28,16 @@ export default function Triagem() {
   const [ordenacao, setOrdenacao] = useState({ campo: 'criado_em', direcao: 'desc' })
   const [stats, setStats] = useState({ pendente: 0, aprovado: 0, descartado: 0 })
 
-  // Importação
+  // Importação - NOVO SISTEMA
   const [modalImport, setModalImport] = useState(false)
   const [arquivo, setArquivo] = useState(null)
   const [importando, setImportando] = useState(false)
   const [previewData, setPreviewData] = useState([])
+  const [rawData, setRawData] = useState([])
+  const [headersPlanilha, setHeadersPlanilha] = useState([])
+  const [mapeamento, setMapeamento] = useState({})
+  const [etapaImport, setEtapaImport] = useState('upload')
+  const [dadosMapeados, setDadosMapeados] = useState([])
   const [erroImport, setErroImport] = useState('')
 
   const [filtros, setFiltros] = useState({
@@ -34,7 +52,7 @@ export default function Triagem() {
     scoreMax: 100,
   })
 
-  const ITENS_POR_PAGINA = 20
+  const ITENS_POR_PAGINA = 10
 
   const carregarDados = useCallback(async () => {
     setCarregando(true)
@@ -129,7 +147,34 @@ export default function Triagem() {
     carregarDados()
   }
 
-  // Importação de arquivo
+  // === SISTEMA DE IMPORTAÇÃO MELHORADO ===
+
+  const detectarMapeamento = (headers) => {
+    const map = {}
+    const sinonimos = {
+      nome: ['nome', 'razao_social', 'razão social', 'razao social', 'nome_fantasia', 'empresa', 'cliente'],
+      cnpj: ['cnpj', 'cnpj_cpf', 'documento'],
+      telefone: ['telefone', 'tel', 'celular', 'whatsapp', 'fone', 'phone', 'contato'],
+      email: ['email', 'e-mail', 'mail', 'correio'],
+      segmento: ['segmento', 'categoria', 'ramo', 'setor', 'tipo'],
+      municipio: ['municipio', 'município', 'cidade', 'city'],
+      bairro: ['bairro', 'neighborhood', 'bairros'],
+      score: ['score', 'pontuacao', 'pontuação', 'nota', 'ranking'],
+      classificacao: ['classificacao', 'classificação', 'classificação', 'classe', 'tipo'],
+      produto_sugerido: ['produto_sugerido', 'produto', 'produtos', 'solucao', 'solução', 'servico', 'serviço'],
+    }
+
+    headers.forEach((h, idx) => {
+      const hLower = h.toLowerCase().trim()
+      for (const [campo, lista] of Object.entries(sinonimos)) {
+        if (lista.includes(hLower) && !map[campo]) {
+          map[campo] = idx
+        }
+      }
+    })
+    return map
+  }
+
   const handleFileChange = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -143,12 +188,28 @@ export default function Triagem() {
     }
 
     setArquivo(file)
+    setEtapaImport('upload')
+    setPreviewData([])
+    setRawData([])
+    setHeadersPlanilha([])
+    setMapeamento({})
+    setDadosMapeados([])
 
-    if (ext === 'csv') {
-      parseCSV(file)
-    } else {
-      // Excel - tenta usar xlsx.js se disponível
-      try {
+    let headers = []
+    let rows = []
+
+    try {
+      if (ext === 'csv') {
+        const text = await file.text()
+        const lines = text.split('\n').filter(l => l.trim())
+        headers = lines[0].split(',').map(h => h.trim())
+        rows = lines.slice(1).map(line => {
+          const values = line.split(',').map(v => v.trim())
+          const obj = {}
+          headers.forEach((h, i) => { obj[h] = values[i] || '' })
+          return obj
+        }).filter(r => Object.values(r).some(v => v))
+      } else {
         const XLSX = await import('xlsx')
         const data = await file.arrayBuffer()
         const workbook = XLSX.read(data, { type: 'array' })
@@ -160,114 +221,107 @@ export default function Triagem() {
           return
         }
 
-        const headers = json[0].map(h => String(h).toLowerCase().trim())
-        const rows = json.slice(1).map(row => {
+        headers = json[0].map(h => String(h).trim())
+        rows = json.slice(1).map(row => {
           const obj = {}
           headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]).trim() : '' })
           return obj
-        }).filter(r => r.nome || r.razao_social || r.cnpj || r['razão social'])
-
-        setPreviewData(rows.slice(0, 5))
-      } catch (err) {
-        setErroImport('Erro ao ler Excel. Instale a biblioteca: npm install xlsx')
-        console.error(err)
+        }).filter(r => Object.values(r).some(v => v))
       }
+
+      setHeadersPlanilha(headers)
+      setRawData(rows)
+      setPreviewData(rows.slice(0, 5))
+      const mapDetectado = detectarMapeamento(headers)
+      setMapeamento(mapDetectado)
+      setEtapaImport('mapeamento')
+    } catch (err) {
+      setErroImport('Erro ao ler arquivo: ' + err.message)
+      console.error(err)
     }
   }
 
-  const parseCSV = (file) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const text = e.target.result
-      const lines = text.split('\n').filter(l => l.trim())
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+  const aplicarMapeamento = () => {
+    const mapeados = rawData.map(row => {
+      const obj = {}
+      CAMPOS_BANCO.forEach(campo => {
+        const idx = mapeamento[campo.key]
+        if (idx !== undefined && idx !== null && headersPlanilha[idx]) {
+          const valor = row[headersPlanilha[idx]] || ''
+          if (campo.key === 'score') {
+            obj[campo.key] = parseInt(valor) || 50
+          } else {
+            obj[campo.key] = valor
+          }
+        } else {
+          obj[campo.key] = campo.key === 'score' ? 50 : ''
+        }
+      })
+      return obj
+    })
+    setDadosMapeados(mapeados)
+    setEtapaImport('preview')
+  }
 
-      const rows = lines.slice(1).map(line => {
-        const values = line.split(',').map(v => v.trim())
-        const obj = {}
-        headers.forEach((h, i) => { obj[h] = values[i] || '' })
-        return obj
-      }).filter(r => r.nome || r.razao_social || r.cnpj || r['razão social'])
-
-      setPreviewData(rows.slice(0, 5))
-    }
-    reader.readAsText(file)
+  const atualizarCampoMapeado = (rowIndex, campoKey, novoValor) => {
+    setDadosMapeados(prev => {
+      const novo = [...prev]
+      novo[rowIndex] = { ...novo[rowIndex], [campoKey]: novoValor }
+      return novo
+    })
   }
 
   const importarLeads = async () => {
-    if (!arquivo || previewData.length === 0) return
+    if (dadosMapeados.length === 0) return
     setImportando(true)
     setErroImport('')
 
     try {
-      let leadsToInsert = []
-      const ext = arquivo.name.split('.').pop().toLowerCase()
-
-      if (ext === 'csv') {
-        const text = await arquivo.text()
-        const lines = text.split('\n').filter(l => l.trim())
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
-
-        leadsToInsert = lines.slice(1).map(line => {
-          const values = line.split(',').map(v => v.trim())
-          const obj = {}
-          headers.forEach((h, i) => { obj[h] = values[i] || '' })
-          return obj
-        })
-      } else {
-        // Excel
-        const XLSX = await import('xlsx')
-        const data = await arquivo.arrayBuffer()
-        const workbook = XLSX.read(data, { type: 'array' })
-        const sheet = workbook.Sheets[workbook.SheetNames[0]]
-        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-
-        const headers = json[0].map(h => String(h).toLowerCase().trim())
-        leadsToInsert = json.slice(1).map(row => {
-          const obj = {}
-          headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? String(row[i]).trim() : '' })
-          return obj
-        })
-      }
-
-      const leadsMapped = leadsToInsert
-        .filter(l => l.nome || l.razao_social || l['razão social'] || l.cnpj)
-        .map(l => ({
-          fonte: 'upload_' + ext,
-          bruto: l,
-          nome: l.nome || l.razao_social || l['razão social'] || 'Sem nome',
-          cnpj: l.cnpj || '',
-          telefone: l.telefone || l.celular || l.whatsapp || '',
-          email: l.email || '',
-          segmento: l.segmento || l.categoria || '',
-          municipio: l.municipio || l.cidade || '',
-          bairro: l.bairro || '',
-          score: parseInt(l.score) || 50,
-          classificacao: l.classificacao || l.classificação || '',
-          produto_sugerido: l.produto_sugerido || l.produto || 'qualificar',
-          status: 'pendente',
-        }))
+      const leadsMapped = dadosMapeados.filter(l => l.nome).map(l => ({
+        fonte: 'upload_' + arquivo.name.split('.').pop().toLowerCase(),
+        bruto: l,
+        nome: l.nome || 'Sem nome',
+        cnpj: l.cnpj || '',
+        telefone: l.telefone || '',
+        email: l.email || '',
+        segmento: l.segmento || '',
+        municipio: l.municipio || '',
+        bairro: l.bairro || '',
+        score: parseInt(l.score) || 50,
+        classificacao: l.classificacao || '',
+        produto_sugerido: l.produto_sugerido || 'qualificar',
+        status: 'pendente',
+      }))
 
       if (leadsMapped.length === 0) {
-        setErroImport('Nenhum lead válido encontrado no arquivo')
+        setErroImport('Nenhum lead válido encontrado')
         setImportando(false)
         return
       }
 
       const { error } = await supabase.from('staging_raspagem').insert(leadsMapped)
-
       if (error) throw error
 
       alert(`${leadsMapped.length} leads importados com sucesso!`)
-      setModalImport(false)
-      setArquivo(null)
-      setPreviewData([])
+      fecharModalImport()
       carregarDados()
     } catch (err) {
       setErroImport('Erro na importação: ' + err.message)
     } finally {
       setImportando(false)
     }
+  }
+
+  const fecharModalImport = () => {
+    setModalImport(false)
+    setArquivo(null)
+    setPreviewData([])
+    setRawData([])
+    setHeadersPlanilha([])
+    setMapeamento({})
+    setEtapaImport('upload')
+    setDadosMapeados([])
+    setErroImport('')
   }
 
   return (
@@ -278,7 +332,7 @@ export default function Triagem() {
           <h1 className="text-2xl font-bold text-gray-100">Triagem</h1>
           <p className="text-sm text-gray-400 mt-1">Aprove ou descarte leads do scraping</p>
         </div>
-        <button 
+        <button
           onClick={() => setModalImport(true)}
           className="flex items-center gap-2 px-4 py-2.5 bg-accent text-black rounded-lg text-sm font-medium hover:bg-accent/90 transition-colors self-start sm:self-auto"
         >
@@ -417,122 +471,269 @@ export default function Triagem() {
         </>
       )}
 
-      {/* Modal: Importar Planilha */}
+      {/* Modal: Importar Planilha - NOVO SISTEMA */}
       {modalImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-surface-card border border-white/[0.08] rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-surface-card border border-white/[0.08] rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center">
-                  <FileSpreadsheet size={20} className="text-accent" />
-                </div>
+                <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center"><FileSpreadsheet size={20} className="text-accent" /></div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-100">Importar Planilha</h3>
-                  <p className="text-sm text-gray-400">CSV ou Excel (.xlsx, .xls)</p>
+                  <p className="text-sm text-gray-400">
+                    {etapaImport === 'upload' && 'Selecione um arquivo CSV ou Excel'}
+                    {etapaImport === 'mapeamento' && `Mapeie as colunas da planilha (${rawData.length} registros)`}
+                    {etapaImport === 'preview' && `Revise e edite os dados antes de importar (${dadosMapeados.length} registros)`}
+                  </p>
                 </div>
               </div>
-              <button 
-                onClick={() => { setModalImport(false); setArquivo(null); setPreviewData([]); setErroImport('') }}
-                className="p-2 rounded-lg hover:bg-white/5 text-gray-400"
-              >
-                <X size={20} />
-              </button>
+              <button onClick={fecharModalImport} className="p-2 rounded-lg hover:bg-white/5 text-gray-400"><X size={20} /></button>
             </div>
 
-            <div className="space-y-4">
-              {/* Upload */}
-              <div 
-                className="border-2 border-dashed border-white/[0.08] rounded-xl p-8 text-center hover:border-accent/30 transition-colors cursor-pointer"
-                onClick={() => document.getElementById('file-upload-triagem').click()}
-              >
-                <input 
-                  id="file-upload-triagem" 
-                  type="file" 
-                  accept=".csv,.xlsx,.xls" 
-                  className="hidden" 
-                  onChange={handleFileChange}
-                />
-                <Upload size={32} className="mx-auto mb-3 text-gray-500" />
-                <p className="text-sm text-gray-300 font-medium">
-                  {arquivo ? arquivo.name : 'Clique para selecionar arquivo'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {arquivo ? `${(arquivo.size / 1024).toFixed(1)} KB` : 'CSV ou Excel (.csv, .xlsx, .xls)'}
-                </p>
-              </div>
+            {/* Steps */}
+            <div className="flex items-center gap-0 px-6 py-3 border-b border-white/[0.08] shrink-0 bg-surface/30">
+              {[
+                { id: 'upload', label: 'Upload' },
+                { id: 'mapeamento', label: 'Mapeamento' },
+                { id: 'preview', label: 'Revisão' },
+              ].map((step, idx) => {
+                const isActive = etapaImport === step.id
+                const isDone = ['mapeamento', 'preview'].indexOf(etapaImport) > ['mapeamento', 'preview'].indexOf(step.id)
+                return (
+                  <div key={step.id} className="flex items-center">
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium ${
+                      isActive ? 'bg-accent/15 text-accent' : isDone ? 'text-green-400' : 'text-gray-500'
+                    }`}>
+                      {isDone ? <Check size={14} /> : <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-xs">{idx + 1}</span>}
+                      {step.label}
+                    </div>
+                    {idx < 2 && <div className="w-8 h-px bg-white/[0.08] mx-2" />}
+                  </div>
+                )
+              })}
+            </div>
 
-              {/* Erro */}
-              {erroImport && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                  <AlertTriangle size={16} />
-                  {erroImport}
+            {/* Conteúdo */}
+            <div className="flex-1 overflow-y-auto p-6 min-h-0">
+              {/* ETAPA 1: UPLOAD */}
+              {etapaImport === 'upload' && (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-white/[0.08] rounded-xl p-12 text-center hover:border-accent/30 transition-colors cursor-pointer" onClick={() => document.getElementById('file-upload-triagem').click()}>
+                    <input id="file-upload-triagem" type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileChange} />
+                    <Upload size={48} className="mx-auto mb-4 text-gray-500" />
+                    <p className="text-base text-gray-300 font-medium">{arquivo ? arquivo.name : 'Clique para selecionar arquivo'}</p>
+                    <p className="text-sm text-gray-500 mt-2">{arquivo ? `${(arquivo.size / 1024).toFixed(1)} KB` : 'CSV ou Excel (.csv, .xlsx, .xls)'}</p>
+                  </div>
+
+                  {erroImport && (
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                      <AlertTriangle size={16} />
+                      {erroImport}
+                    </div>
+                  )}
+
+                  {previewData.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 mb-2">Preview ({previewData.length} primeiros registros):</p>
+                      <div className="bg-surface border border-white/[0.08] rounded-lg overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-white/[0.08]">
+                              {headersPlanilha.map((h, i) => (
+                                <th key={i} className="px-3 py-2 text-left text-gray-400 font-medium whitespace-nowrap">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {previewData.map((row, i) => (
+                              <tr key={i} className="border-b border-white/[0.04]">
+                                {headersPlanilha.map((h, j) => (
+                                  <td key={j} className="px-3 py-2 text-gray-300 whitespace-nowrap">{row[h] || '—'}</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Preview */}
-              {previewData.length > 0 && (
-                <div>
-                  <p className="text-xs text-gray-400 mb-2">Preview ({previewData.length} primeiros registros):</p>
-                  <div className="bg-surface border border-white/[0.08] rounded-lg overflow-x-auto max-h-48">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-white/[0.08]">
-                          <th className="px-3 py-2 text-left text-gray-400">Nome</th>
-                          <th className="px-3 py-2 text-left text-gray-400">CNPJ</th>
-                          <th className="px-3 py-2 text-left text-gray-400">Cidade</th>
-                          <th className="px-3 py-2 text-left text-gray-400">Score</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previewData.map((row, i) => (
-                          <tr key={i} className="border-b border-white/[0.04]">
-                            <td className="px-3 py-2 text-gray-300 truncate max-w-[150px]">{row.nome || row.razao_social || row['razão social'] || '—'}</td>
-                            <td className="px-3 py-2 text-gray-400 font-mono">{row.cnpj || '—'}</td>
-                            <td className="px-3 py-2 text-gray-400">{row.municipio || row.cidade || '—'}</td>
-                            <td className="px-3 py-2 text-gray-400">{row.score || '—'}</td>
+              {/* ETAPA 2: MAPEAMENTO */}
+              {etapaImport === 'mapeamento' && (
+                <div className="space-y-6">
+                  <div className="bg-surface/50 border border-white/[0.06] rounded-lg p-4">
+                    <p className="text-sm text-gray-400">
+                      <AlertCircle size={14} className="inline mr-1.5 -mt-0.5 text-yellow-400" />
+                      Associe cada coluna da planilha ao campo correspondente no banco de dados. Campos obrigatórios estão marcados com <span className="text-red-400">*</span>.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {CAMPOS_BANCO.map(campo => (
+                      <div key={campo.key} className="bg-surface border border-white/[0.08] rounded-lg p-4">
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          {campo.label}
+                          {campo.obrigatorio && <span className="text-red-400 ml-1">*</span>}
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={mapeamento[campo.key] !== undefined ? mapeamento[campo.key] : ''}
+                            onChange={e => {
+                              const val = e.target.value
+                              setMapeamento(prev => ({
+                                ...prev,
+                                [campo.key]: val === '' ? undefined : parseInt(val)
+                              }))
+                            }}
+                            className="w-full bg-surface-card border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent/30 appearance-none cursor-pointer"
+                          >
+                            <option value="">— Não mapear —</option>
+                            {headersPlanilha.map((h, idx) => (
+                              <option key={idx} value={idx}>{h}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                        </div>
+                        {mapeamento[campo.key] !== undefined && headersPlanilha[mapeamento[campo.key]] && (
+                          <p className="text-xs text-gray-500 mt-1.5">
+                            Exemplo: <span className="text-gray-300">{rawData[0]?.[headersPlanilha[mapeamento[campo.key]]] || '—'}</span>
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Preview das primeiras linhas */}
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-300 mb-3">Preview da planilha original</h4>
+                    <div className="bg-surface border border-white/[0.08] rounded-lg overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-white/[0.08] bg-surface/50">
+                            {headersPlanilha.map((h, i) => (
+                              <th key={i} className="px-3 py-2.5 text-left text-gray-400 font-medium whitespace-nowrap">{h}</th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {rawData.slice(0, 3).map((row, i) => (
+                            <tr key={i} className="border-b border-white/[0.04]">
+                              {headersPlanilha.map((h, j) => (
+                                <td key={j} className="px-3 py-2 text-gray-300 whitespace-nowrap">{row[h] || '—'}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Info */}
-              <div className="bg-surface/50 border border-white/[0.06] rounded-lg p-3">
-                <p className="text-xs text-gray-500">
-                  <strong className="text-gray-400">Colunas esperadas:</strong> nome, cnpj, telefone, email, segmento, municipio, bairro, score, classificacao, produto_sugerido
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Os leads serão enviados para <strong className="text-accent">Triagem</strong> para aprovação.
-                </p>
-              </div>
+              {/* ETAPA 3: PREVIEW / REVISÃO */}
+              {etapaImport === 'preview' && (
+                <div className="space-y-4">
+                  <div className="bg-surface/50 border border-white/[0.06] rounded-lg p-4 flex items-center justify-between">
+                    <p className="text-sm text-gray-400">
+                      <Check size={14} className="inline mr-1.5 -mt-0.5 text-green-400" />
+                      Revise os dados mapeados. Você pode editar qualquer campo clicando nele.
+                    </p>
+                    <span className="text-sm text-gray-500">{dadosMapeados.length} registros</span>
+                  </div>
 
-              {/* Ações */}
+                  <div className="bg-surface border border-white/[0.08] rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto max-h-[50vh]">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 z-10">
+                          <tr className="border-b border-white/[0.08] bg-surface-card">
+                            <th className="px-3 py-2.5 text-left text-gray-400 font-medium w-10">#</th>
+                            {CAMPOS_BANCO.map(c => (
+                              <th key={c.key} className="px-3 py-2.5 text-left text-gray-400 font-medium whitespace-nowrap">
+                                {c.label}
+                                {c.obrigatorio && <span className="text-red-400 ml-1">*</span>}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dadosMapeados.map((row, i) => (
+                            <tr key={i} className="border-b border-white/[0.04] hover:bg-white/[0.02]">
+                              <td className="px-3 py-2 text-gray-500">{i + 1}</td>
+                              {CAMPOS_BANCO.map(c => (
+                                <td key={c.key} className="px-3 py-2">
+                                  <input
+                                    type="text"
+                                    value={row[c.key] || ''}
+                                    onChange={e => atualizarCampoMapeado(i, c.key, e.target.value)}
+                                    className={`w-full min-w-[120px] bg-transparent border border-transparent rounded px-2 py-1 text-gray-300 text-xs focus:outline-none focus:border-accent/50 focus:bg-surface/50 transition-all ${
+                                      c.obrigatorio && !row[c.key] ? 'border-red-500/30 bg-red-500/5' : ''
+                                    }`}
+                                    placeholder={c.obrigatorio ? 'Obrigatório' : '—'}
+                                  />
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="bg-surface/50 border border-white/[0.06] rounded-lg p-4">
+                    <p className="text-xs text-gray-500">
+                      <strong className="text-gray-400">Importante:</strong> Os dados serão enviados para <strong className="text-accent">Triagem</strong> para aprovação antes de entrarem no funil.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-white/[0.08] shrink-0 bg-surface/30">
+              <button onClick={fecharModalImport} className="px-4 py-2.5 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors">
+                Cancelar
+              </button>
               <div className="flex gap-3">
-                <button
-                  onClick={() => { setModalImport(false); setArquivo(null); setPreviewData([]); setErroImport('') }}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={importarLeads}
-                  disabled={!arquivo || importando}
-                  className="flex-1 px-4 py-2.5 bg-accent text-black rounded-xl text-sm font-medium hover:bg-accent/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                >
-                  {importando ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                      Importando...
-                    </>
-                  ) : (
-                    <>
-                      <FileText size={16} />
-                      Importar Leads
-                    </>
-                  )}
-                </button>
+                {etapaImport === 'mapeamento' && (
+                  <>
+                    <button onClick={() => setEtapaImport('upload')} className="px-4 py-2.5 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors">
+                      Voltar
+                    </button>
+                    <button
+                      onClick={aplicarMapeamento}
+                      disabled={!mapeamento.nome && mapeamento.nome !== 0}
+                      className="px-5 py-2.5 bg-accent text-black rounded-xl text-sm font-medium hover:bg-accent/90 disabled:opacity-50 transition-colors flex items-center gap-2"
+                    >
+                      <Check size={16} />Continuar
+                    </button>
+                  </>
+                )}
+                {etapaImport === 'preview' && (
+                  <>
+                    <button onClick={() => setEtapaImport('mapeamento')} className="px-4 py-2.5 rounded-xl text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors">
+                      Voltar
+                    </button>
+                    <button
+                      onClick={importarLeads}
+                      disabled={importando || dadosMapeados.some(d => !d.nome)}
+                      className="px-5 py-2.5 bg-accent text-black rounded-xl text-sm font-medium hover:bg-accent/90 disabled:opacity-50 transition-colors flex items-center gap-2"
+                    >
+                      {importando ? (
+                        <><div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />Importando...</>
+                      ) : (
+                        <><FileText size={16} />Importar {dadosMapeados.length} Leads</>
+                      )}
+                    </button>
+                  </>
+                )}
+                {etapaImport === 'upload' && arquivo && (
+                  <button onClick={() => setEtapaImport('mapeamento')} className="px-5 py-2.5 bg-accent text-black rounded-xl text-sm font-medium hover:bg-accent/90 transition-colors">
+                    Continuar
+                  </button>
+                )}
               </div>
             </div>
           </div>

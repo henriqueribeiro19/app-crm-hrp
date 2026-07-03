@@ -6,7 +6,45 @@ import { TabelaEmpresas } from '../components/ui/TabelaEmpresas'
 import { Paginacao } from '../components/ui/Paginacao'
 import { SkeletonTabela } from '../components/ui/SkeletonTabela'
 import { ModalEmpresa } from '../components/ui/ModalEmpresa'
-import { Plus, X, Building2, Save, Search, Check } from 'lucide-react'
+import { Plus, X, Building2, Save, Search, Check, AlertCircle } from 'lucide-react'
+
+// === FUNÇÕES DE MÁSCARA E VALIDAÇÃO ===
+function mascaraCNPJ(valor) {
+  const numeros = valor.replace(/\D/g, '').slice(0, 14)
+  return numeros
+    .replace(/(\d{2})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1/$2')
+    .replace(/(\d{4})(\d{1,2})$/, '$1-$2')
+}
+
+function mascaraTelefone(valor) {
+  const numeros = valor.replace(/\D/g, '').slice(0, 11)
+  if (numeros.length <= 10) {
+    return numeros
+      .replace(/(\d{2})(\d)/, '($1) $2')
+      .replace(/(\d{4})(\d{1,4})$/, '$1-$2')
+  }
+  return numeros
+    .replace(/(\d{2})(\d)/, '($1) $2')
+    .replace(/(\d{5})(\d{1,4})$/, '$1-$2')
+}
+
+function validarEmail(email) {
+  if (!email) return true // vazio é válido (campo opcional)
+  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return regex.test(email)
+}
+
+function validarCNPJ(cnpj) {
+  const numeros = cnpj.replace(/\D/g, '')
+  return numeros.length === 14
+}
+
+function validarTelefone(telefone) {
+  const numeros = telefone.replace(/\D/g, '')
+  return numeros.length >= 10 && numeros.length <= 11
+}
 
 export default function Leads() {
   const navigate = useNavigate()
@@ -22,6 +60,10 @@ export default function Leads() {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [sucesso, setSucesso] = useState('')
+
+  // Estados de validação
+  const [errosValidacao, setErrosValidacao] = useState({})
+  const [tentouSalvar, setTentouSalvar] = useState(false)
 
   const [form, setForm] = useState({
     nome: '',
@@ -56,7 +98,7 @@ export default function Leads() {
     scoreMax: 100,
   })
 
-  const ITENS_POR_PAGINA = 20
+  const ITENS_POR_PAGINA = 10
 
   const carregarDados = async () => {
     setCarregando(true)
@@ -119,21 +161,60 @@ export default function Leads() {
     }))
   }
 
+  // Atualiza campo com máscara
+  const atualizarCampo = (campo, valor) => {
+    let valorFormatado = valor
+    if (campo === 'cnpj') valorFormatado = mascaraCNPJ(valor)
+    if (campo === 'telefone') valorFormatado = mascaraTelefone(valor)
+    if (campo === 'matriz_cnpj') valorFormatado = mascaraCNPJ(valor)
+
+    setForm(prev => ({ ...prev, [campo]: valorFormatado }))
+
+    // Limpa erro do campo ao digitar
+    if (errosValidacao[campo]) {
+      setErrosValidacao(prev => ({ ...prev, [campo]: '' }))
+    }
+  }
+
+  // Valida todos os campos
+  const validarFormulario = () => {
+    const erros = {}
+
+    if (!form.nome.trim()) erros.nome = 'Razão Social é obrigatória'
+    if (form.tipo === 'matriz' && !validarCNPJ(form.cnpj)) erros.cnpj = 'CNPJ inválido (deve ter 14 dígitos)'
+    if (form.tipo === 'filial' && !validarCNPJ(form.matriz_cnpj)) erros.matriz_cnpj = 'CNPJ da matriz inválido'
+    if (form.telefone && !validarTelefone(form.telefone)) erros.telefone = 'Telefone inválido'
+    if (form.email && !validarEmail(form.email)) erros.email = 'E-mail inválido'
+    if (!form.segmento.trim()) erros.segmento = 'Segmento é obrigatório'
+
+    setErrosValidacao(erros)
+    return Object.keys(erros).length === 0
+  }
+
   const handleSalvar = async (e) => {
     e.preventDefault()
-    setSalvando(true)
+    setTentouSalvar(true)
     setErro('')
     setSucesso('')
+
+    if (!validarFormulario()) return
+
+    setSalvando(true)
 
     try {
       const payload = { ...form }
 
+      // Remove formatação antes de salvar
+      payload.cnpj = payload.cnpj.replace(/\D/g, '')
+      payload.telefone = payload.telefone.replace(/\D/g, '')
+
       // Se for filial, buscar matriz pelo CNPJ
       if (form.tipo === 'filial' && form.matriz_cnpj) {
+        const cnpjLimpo = form.matriz_cnpj.replace(/\D/g, '')
         const { data: matriz } = await supabase
           .from('empresas')
           .select('id')
-          .eq('cnpj', form.matriz_cnpj)
+          .eq('cnpj', cnpjLimpo)
           .eq('tipo', 'matriz')
           .is('excluido_em', null)
           .single()
@@ -158,6 +239,8 @@ export default function Leads() {
         score: 50, classificacao: '', produto_sugerido: '', status_funil: 'novo',
         observacoes: '', tipo: 'matriz', matriz_cnpj: '', unidade: '',
       })
+      setErrosValidacao({})
+      setTentouSalvar(false)
       setMostrarForm(false)
       carregarDados()
     } catch (err) {
@@ -181,8 +264,13 @@ export default function Leads() {
     carregarDados()
   }
 
-  const inputClass = "w-full bg-surface border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent/50 transition-all"
+  const inputBaseClass = "w-full bg-surface border rounded-lg px-3 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent/50 transition-all"
   const labelClass = "block text-xs font-medium text-gray-400 mb-1.5"
+
+  const getInputClass = (campo) => {
+    const temErro = tentouSalvar && errosValidacao[campo]
+    return `${inputBaseClass} ${temErro ? 'border-red-500/50 focus:ring-red-500/30 focus:border-red-500/50' : 'border-white/[0.08]'}`
+  }
 
   return (
     <div className="space-y-6">
@@ -252,11 +340,14 @@ export default function Leads() {
                   <label className={labelClass}>CNPJ da Matriz *</label>
                   <input
                     value={form.matriz_cnpj}
-                    onChange={e => setForm({ ...form, matriz_cnpj: e.target.value })}
+                    onChange={e => atualizarCampo('matriz_cnpj', e.target.value)}
                     placeholder="00.000.000/0001-00"
-                    className={inputClass}
-                    required
+                    className={getInputClass('matriz_cnpj')}
+                    maxLength={18}
                   />
+                  {tentouSalvar && errosValidacao.matriz_cnpj && (
+                    <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={12} />{errosValidacao.matriz_cnpj}</p>
+                  )}
                   <p className="text-xs text-gray-500 mt-1">Digite o CNPJ da matriz já cadastrada</p>
                 </div>
                 <div>
@@ -265,7 +356,7 @@ export default function Leads() {
                     value={form.unidade}
                     onChange={e => setForm({ ...form, unidade: e.target.value })}
                     placeholder="Ex: Loja Centro, Unidade Paulista..."
-                    className={inputClass}
+                    className={inputBaseClass + ' border-white/[0.08]'}
                     required
                   />
                 </div>
@@ -275,51 +366,87 @@ export default function Leads() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Razão Social *</label>
-                <input value={form.nome} onChange={e => setForm({...form, nome: e.target.value})} className={inputClass} required />
+                <input
+                  value={form.nome}
+                  onChange={e => setForm({...form, nome: e.target.value})}
+                  className={getInputClass('nome')}
+                />
+                {tentouSalvar && errosValidacao.nome && (
+                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={12} />{errosValidacao.nome}</p>
+                )}
               </div>
               <div>
                 <label className={labelClass}>Nome Fantasia</label>
-                <input value={form.nome_fantasia} onChange={e => setForm({...form, nome_fantasia: e.target.value})} className={inputClass} />
+                <input value={form.nome_fantasia} onChange={e => setForm({...form, nome_fantasia: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'} />
               </div>
               <div>
                 <label className={labelClass}>CNPJ {form.tipo === 'matriz' ? '*' : ''}</label>
                 <input
                   value={form.cnpj}
-                  onChange={e => setForm({...form, cnpj: e.target.value})}
+                  onChange={e => atualizarCampo('cnpj', e.target.value)}
                   placeholder="00.000.000/0001-00"
-                  className={inputClass}
-                  required={form.tipo === 'matriz'}
+                  className={getInputClass('cnpj')}
+                  maxLength={18}
                 />
+                {tentouSalvar && errosValidacao.cnpj && (
+                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={12} />{errosValidacao.cnpj}</p>
+                )}
                 {form.tipo === 'filial' && (
                   <p className="text-xs text-gray-500 mt-1">Pode ser o mesmo CNPJ da matriz</p>
                 )}
               </div>
               <div>
                 <label className={labelClass}>Telefone</label>
-                <input value={form.telefone} onChange={e => setForm({...form, telefone: e.target.value})} placeholder="(11) 99999-0000" className={inputClass} />
+                <input
+                  value={form.telefone}
+                  onChange={e => atualizarCampo('telefone', e.target.value)}
+                  placeholder="(11) 99999-0000"
+                  className={getInputClass('telefone')}
+                  maxLength={15}
+                />
+                {tentouSalvar && errosValidacao.telefone && (
+                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={12} />{errosValidacao.telefone}</p>
+                )}
               </div>
               <div>
                 <label className={labelClass}>E-mail</label>
-                <input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder="contato@empresa.com.br" className={inputClass} />
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={e => setForm({...form, email: e.target.value})}
+                  placeholder="contato@empresa.com.br"
+                  className={getInputClass('email')}
+                />
+                {tentouSalvar && errosValidacao.email && (
+                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={12} />{errosValidacao.email}</p>
+                )}
               </div>
               <div>
-                <label className={labelClass}>Segmento</label>
-                <input value={form.segmento} onChange={e => setForm({...form, segmento: e.target.value})} placeholder="Padaria, Restaurante..." className={inputClass} />
+                <label className={labelClass}>Segmento *</label>
+                <input
+                  value={form.segmento}
+                  onChange={e => setForm({...form, segmento: e.target.value})}
+                  placeholder="Padaria, Restaurante..."
+                  className={getInputClass('segmento')}
+                />
+                {tentouSalvar && errosValidacao.segmento && (
+                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1"><AlertCircle size={12} />{errosValidacao.segmento}</p>
+                )}
               </div>
               <div>
                 <label className={labelClass}>Município</label>
-                <input value={form.municipio} onChange={e => setForm({...form, municipio: e.target.value})} className={inputClass} />
+                <input value={form.municipio} onChange={e => setForm({...form, municipio: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'} />
               </div>
               <div>
                 <label className={labelClass}>Bairro</label>
-                <input value={form.bairro} onChange={e => setForm({...form, bairro: e.target.value})} className={inputClass} />
+                <input value={form.bairro} onChange={e => setForm({...form, bairro: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'} />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className={labelClass}>Produto</label>
-                <select value={form.produto_sugerido} onChange={e => setForm({...form, produto_sugerido: e.target.value})} className={inputClass}>
+                <select value={form.produto_sugerido} onChange={e => setForm({...form, produto_sugerido: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'}>
                   <option value="">Selecione...</option>
                   <option value="cloudfy">Cloudfy</option>
                   <option value="cplung">Cplung</option>
@@ -328,7 +455,7 @@ export default function Leads() {
               </div>
               <div>
                 <label className={labelClass}>Classificação</label>
-                <select value={form.classificacao} onChange={e => setForm({...form, classificacao: e.target.value})} className={inputClass}>
+                <select value={form.classificacao} onChange={e => setForm({...form, classificacao: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'}>
                   <option value="">—</option>
                   <option value="A">A</option>
                   <option value="B">B</option>
@@ -337,7 +464,7 @@ export default function Leads() {
               </div>
               <div>
                 <label className={labelClass}>Porte</label>
-                <select value={form.porte} onChange={e => setForm({...form, porte: e.target.value})} className={inputClass}>
+                <select value={form.porte} onChange={e => setForm({...form, porte: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'}>
                   <option value="">—</option>
                   <option value="MEI">MEI</option>
                   <option value="ME">ME</option>
@@ -347,7 +474,7 @@ export default function Leads() {
               </div>
               <div>
                 <label className={labelClass}>Score (0-100)</label>
-                <input type="number" min="0" max="100" value={form.score} onChange={e => setForm({...form, score: parseInt(e.target.value) || 0})} className={inputClass} />
+                <input type="number" min="0" max="100" value={form.score} onChange={e => setForm({...form, score: parseInt(e.target.value) || 0})} className={inputBaseClass + ' border-white/[0.08]'} />
               </div>
             </div>
 
@@ -364,7 +491,7 @@ export default function Leads() {
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setMostrarForm(false)}
+                onClick={() => { setMostrarForm(false); setErrosValidacao({}); setTentouSalvar(false) }}
                 className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors"
               >
                 Cancelar
