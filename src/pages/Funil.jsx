@@ -350,26 +350,26 @@ export default function Funil() {
   }, [leads])
 
   return (
-    <div className="h-screen flex flex-col p-4 lg:p-6 overflow-hidden">
+    <div className="min-h-screen flex flex-col overflow-hidden bg-[#0a0c10]">
       {/* Header */}
-      <div className="flex flex-col gap-4 mb-4 shrink-0">
-        <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:gap-4 p-3 md:p-4 lg:p-6 pb-2 md:pb-3 shrink-0 border-b border-white/[0.08]">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-gray-100">Funil de Vendas</h1>
-            <p className="text-sm text-gray-400 mt-1">Arraste os cards entre as colunas ou use as setas para mover de etapa</p>
+            <h1 className="text-xl md:text-2xl font-bold text-gray-100">Funil de Vendas</h1>
+            <p className="text-xs md:text-sm text-gray-400 mt-1">Arraste os cards entre as colunas ou use as setas para mover de etapa</p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1.5 rounded-lg bg-surface-card border border-white/[0.08] text-sm text-gray-400">
+          <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto">
+            <span className="px-2 md:px-3 py-1.5 rounded-lg bg-surface-card border border-white/[0.08] text-xs md:text-sm text-gray-400 whitespace-nowrap">
               {leadsFiltrados.length} leads{filtroPeriodo !== 'todos' ? ` em ${formatarPeriodo(filtroPeriodo, filtroAno, filtroMes).toLowerCase()}` : ''}
             </span>
-            <button onClick={() => setModalImport(true)} className="flex items-center gap-2 px-4 py-2 bg-accent text-black rounded-lg text-sm font-medium hover:bg-accent/90 transition-colors">
-              <Upload size={16} />Importar Planilha
+            <button onClick={() => setModalImport(true)} className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1.5 md:py-2 bg-accent text-black rounded-lg text-xs md:text-sm font-medium hover:bg-accent/90 transition-colors whitespace-nowrap">
+              <Upload size={14} className="md:w-4 md:h-4" /><span className="hidden sm:inline">Importar Planilha</span><span className="sm:hidden">Importar</span>
             </button>
           </div>
         </div>
 
         {/* Filtro de Período */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
           {/* Botões rápidos */}
           {[
             { id: 'todos', label: 'Todos' },
@@ -380,7 +380,7 @@ export default function Funil() {
             <button
               key={btn.id}
               onClick={() => { setFiltroPeriodo(btn.id); setMostrarSeletorMes(false) }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                 filtroPeriodo === btn.id
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'bg-surface-card border border-white/[0.08] text-gray-400 hover:text-gray-200 hover:border-white/[0.12]'
@@ -394,7 +394,7 @@ export default function Funil() {
           <div className="relative">
             <button
               onClick={() => setMostrarSeletorMes(!mostrarSeletorMes)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`flex items-center gap-1 px-2 md:px-3 py-1 md:py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                 filtroPeriodo === 'custom'
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'bg-surface-card border border-white/[0.08] text-gray-400 hover:text-gray-200 hover:border-white/[0.12]'
@@ -406,7 +406,7 @@ export default function Funil() {
             </button>
 
             {mostrarSeletorMes && (
-              <div className="absolute top-full left-0 mt-2 bg-surface-card border border-white/[0.08] rounded-xl p-4 shadow-2xl z-50 w-64">
+              <div className="absolute top-full left-0 mt-2 bg-surface-card border border-white/[0.08] rounded-xl p-4 shadow-2xl z-50 w-56 md:w-64">
                 <div className="flex items-center justify-between mb-3">
                   <button
                     onClick={() => setFiltroAno(a => a - 1)}
@@ -456,23 +456,23 @@ export default function Funil() {
           {filtroPeriodo !== 'todos' && (
             <button
               onClick={() => { setFiltroPeriodo('todos'); setMostrarSeletorMes(false) }}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors"
+              className="flex items-center gap-1 px-1.5 md:px-2 py-1 md:py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors whitespace-nowrap"
             >
-              <X size={10} /> Limpar filtro
+              <X size={10} /> Limpar
             </button>
           )}
         </div>
       </div>
 
       {/* Kanban */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="flex gap-4 h-full min-h-0 pb-8" style={{ width: 'max-content' }}>
+      <div className="flex-1 overflow-x-auto overflow-y-hidden px-3 md:px-4 lg:px-6 pt-3 md:pt-4 pb-12">
+        <div className="flex gap-4 h-full min-h-0" style={{ width: 'max-content' }}>
           {COLUNAS.map(coluna => {
             const colLeads = leadsPorColuna(coluna.id)
             return (
               <div
                 key={coluna.id}
-                className={`w-80 flex flex-col bg-surface-card border border-white/[0.08] rounded-xl overflow-hidden ${coluna.cor} border-l-4 min-h-0`}
+                className={`w-64 md:w-72 flex flex-col bg-surface-card border border-white/[0.08] rounded-xl overflow-hidden ${coluna.cor} border-l-4 min-h-0 shrink-0`}
                 style={{ height: '100%', maxHeight: '100%' }}
                 onDragOver={e => { e.preventDefault(); setColunaArrastando(coluna.id) }}
                 onDragLeave={() => setColunaArrastando(null)}
@@ -483,60 +483,60 @@ export default function Funil() {
                   setColunaArrastando(null)
                 }}
               >
-                <div className={`px-4 py-3 border-b border-white/[0.08] flex items-center justify-between shrink-0 ${coluna.bg}`}>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-gray-200 text-sm">{coluna.label}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${coluna.badge}`}>{colLeads.length}</span>
+                <div className={`px-3 py-2.5 border-b border-white/[0.08] flex items-center justify-between shrink-0 ${coluna.bg}`}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="font-semibold text-gray-200 text-xs md:text-sm truncate">{coluna.label}</h3>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${coluna.badge}`}>{colLeads.length}</span>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 pb-24 space-y-3 min-h-0">
+                <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
                   {carregando ? (
                     Array.from({ length: 3 }).map((_, i) => (
-                      <div key={i} className="bg-surface border border-white/[0.04] rounded-lg p-4 animate-pulse">
+                      <div key={i} className="bg-surface border border-white/[0.04] rounded-lg p-3 animate-pulse">
                         <div className="h-4 bg-white/5 rounded w-3/4 mb-2" /><div className="h-3 bg-white/5 rounded w-1/2" />
                       </div>
                     ))
                   ) : colLeads.length === 0 ? (
-                    <div className="text-center py-8 text-gray-600 text-sm">Nenhum lead nesta etapa</div>
+                    <div className="text-center py-8 text-gray-600 text-xs md:text-sm">Nenhum lead nesta etapa</div>
                   ) : (
                     colLeads.map(lead => (
                       <div
                         key={lead.id} draggable
                         onDragStart={e => e.dataTransfer.setData('leadId', lead.id)}
-                        className="bg-surface border border-white/[0.06] rounded-lg p-4 cursor-grab active:cursor-grabbing hover:border-white/[0.12] hover:shadow-lg hover:shadow-black/20 transition-all group"
+                        className="bg-surface border border-white/[0.06] rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-white/[0.12] hover:shadow-lg hover:shadow-black/20 transition-all group"
                       >
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/30 to-accent/10 flex items-center justify-center text-accent font-bold text-xs shrink-0">
+                            <div className="w-6 md:w-8 h-6 md:h-8 rounded-lg bg-gradient-to-br from-accent/30 to-accent/10 flex items-center justify-center text-accent font-bold text-xs shrink-0">
                               {(lead.nome_fantasia || lead.nome).split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
                             </div>
                             <div className="min-w-0">
-                              <h4 className="font-medium text-gray-100 text-sm truncate">{lead.nome_fantasia || lead.nome}</h4>
+                              <h4 className="font-medium text-gray-100 text-xs md:text-sm truncate">{lead.nome_fantasia || lead.nome}</h4>
                               {lead.tipo === 'filial' && <span className="text-[10px] text-yellow-400">{lead.unidade || 'Filial'}</span>}
                             </div>
                           </div>
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                             <button onClick={() => setModalEmpresa(lead)} className="p-1 rounded hover:bg-white/5 text-gray-400 hover:text-gray-200" title="Ver detalhes"><MoreHorizontal size={14} /></button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-gray-500 mb-2"><span>{lead.segmento || '—'}</span><span>·</span><span>{lead.municipio || '—'}</span></div>
+                        <div className="flex items-center gap-1 text-xs text-gray-500 mb-2"><span className="truncate">{lead.segmento || '—'}</span><span>·</span><span className="truncate">{lead.municipio || '—'}</span></div>
                         <div className="flex items-center gap-2 mb-3">
                           <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-accent to-emerald-400" style={{ width: `${lead.score}%` }} /></div>
-                          <span className="text-xs font-semibold text-gray-300">{lead.score}</span>
+                          <span className="text-xs font-semibold text-gray-300 shrink-0">{lead.score}</span>
                         </div>
                         <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
                           <div className="flex gap-1">
                             {lead.email && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); setModalEmail(lead); setCopiado(false) }}
-                                className="p-1.5 rounded-lg hover:bg-purple-500/10 text-gray-500 hover:text-purple-400 transition-colors"
+                                className="p-1 md:p-1.5 rounded-lg hover:bg-purple-500/10 text-gray-500 hover:text-purple-400 transition-colors"
                                 title="Enviar E-mail"
                               >
                                 <Mail size={14} />
                               </button>
                             )}
-                            {lead.telefone && <a href={`https://wa.me/${lead.telefone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded-lg hover:bg-green-500/10 text-gray-500 hover:text-green-400 transition-colors" title="WhatsApp"><MessageCircle size={14} /></a>}
-                            {lead.telefone && <a href={`tel:${lead.telefone.replace(/\D/g, '')}`} className="p-1.5 rounded-lg hover:bg-blue-500/10 text-gray-500 hover:text-blue-400 transition-colors" title="Ligar"><Phone size={14} /></a>}
+                            {lead.telefone && <a href={`https://wa.me/${lead.telefone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-1 md:p-1.5 rounded-lg hover:bg-green-500/10 text-gray-500 hover:text-green-400 transition-colors" title="WhatsApp"><MessageCircle size={14} /></a>}
+                            {lead.telefone && <a href={`tel:${lead.telefone.replace(/\D/g, '')}`} className="p-1 md:p-1.5 rounded-lg hover:bg-blue-500/10 text-gray-500 hover:text-blue-400 transition-colors" title="Ligar"><Phone size={14} /></a>}
                           </div>
                           <div className="flex gap-1">
                             {COLUNAS.map((c, idx) => {

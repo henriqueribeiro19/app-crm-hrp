@@ -46,6 +46,10 @@ function validarTelefone(telefone) {
   return numeros.length >= 10 && numeros.length <= 11
 }
 
+const UFs = [
+  'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
+]
+
 export default function Leads() {
   const navigate = useNavigate()
   const [empresas, setEmpresas] = useState([])
@@ -211,13 +215,23 @@ export default function Leads() {
       // Se for filial, buscar matriz pelo CNPJ
       if (form.tipo === 'filial' && form.matriz_cnpj) {
         const cnpjLimpo = form.matriz_cnpj.replace(/\D/g, '')
-        const { data: matriz } = await supabase
+        // Buscar todas as matrizes e comparar o CNPJ "limpo" no cliente.
+        // Isso evita problemas com formatações diferentes ou espaços invisíveis
+        // armazenados no banco.
+        const { data: possiveisMatrizes, error: listarError } = await supabase
           .from('empresas')
-          .select('id')
-          .eq('cnpj', cnpjLimpo)
+          .select('id,cnpj')
           .eq('tipo', 'matriz')
           .is('excluido_em', null)
-          .single()
+
+        if (listarError) {
+          console.debug('Erro ao listar matrizes:', listarError)
+        }
+
+        const matriz = (possiveisMatrizes || []).find(m => {
+          if (!m.cnpj) return false
+          return m.cnpj.replace(/\D/g, '') === cnpjLimpo
+        })
 
         if (!matriz) {
           setErro('Matriz não encontrada. Verifique o CNPJ da matriz.')
@@ -228,6 +242,17 @@ export default function Leads() {
       }
 
       delete payload.matriz_cnpj
+
+      // Se for filial e o CNPJ informado for o mesmo da matriz, não inserir o CNPJ
+      // (há um índice único em empresas.cnpj que causará erro ao duplicar)
+      if (form.tipo === 'filial' && payload.cnpj) {
+        const cnpjDaFilial = payload.cnpj.replace(/\D/g, '')
+        // comparar com o cnpj da matriz informado no formulário
+        const cnpjMatrizInformado = (form.matriz_cnpj || '').replace(/\D/g, '')
+        if (cnpjMatrizInformado && cnpjDaFilial === cnpjMatrizInformado) {
+          payload.cnpj = null
+        }
+      }
 
       const { error } = await supabase.from('empresas').insert(payload)
       if (error) throw error
@@ -436,6 +461,14 @@ export default function Leads() {
               <div>
                 <label className={labelClass}>Município</label>
                 <input value={form.municipio} onChange={e => setForm({...form, municipio: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'} />
+              </div>
+              <div>
+                <label className={labelClass}>UF</label>
+                <select value={form.uf} onChange={e => setForm({...form, uf: e.target.value})} className={inputBaseClass + ' border-white/[0.08]'}>
+                  {UFs.map(uf => (
+                    <option key={uf} value={uf}>{uf}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className={labelClass}>Bairro</label>

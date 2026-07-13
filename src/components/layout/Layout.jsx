@@ -32,15 +32,15 @@ export default function Layout() {
   const isFunil = location.pathname === '/funil'
 
   return (
-    <div className="min-h-screen bg-[#0a0c10] flex">
+    <div className="min-h-screen bg-[#0a0c10] flex flex-col lg:flex-row">
       {/* Sidebar Desktop */}
-      <aside className="hidden lg:flex flex-col w-64 bg-surface-sidebar border-r border-white/[0.06] fixed h-full z-30">
+      <aside className="hidden lg:flex flex-col w-56 bg-surface-sidebar border-r border-white/[0.06] fixed h-full z-30 top-0 left-0">
         <div className="p-6 border-b border-white/[0.06]">
           <h1 className="text-xl font-bold text-gray-100 tracking-tight">APP CRM HRP</h1>
           <p className="text-xs text-gray-500 mt-1">Food Service & Varejo</p>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -59,9 +59,9 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-white/[0.06]">
+        <div className="p-4 border-t border-white/[0.06] shrink-0">
           <div className="flex items-center gap-3 px-4 py-3 mb-2">
-            <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-bold">
+            <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-bold shrink-0">
               {perfil?.nome?.[0]?.toUpperCase() || usuario?.email?.[0]?.toUpperCase() || 'U'}
             </div>
             <div className="min-w-0">
@@ -80,15 +80,15 @@ export default function Layout() {
       </aside>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-surface-sidebar border-b border-white/[0.06]">
-        <div className="flex items-center justify-between px-4 py-3">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-surface-sidebar border-b border-white/[0.06] h-16">
+        <div className="flex items-center justify-between px-4 py-3 h-full">
           <h1 className="text-lg font-bold text-gray-100">APP CRM HRP</h1>
-          <button onClick={() => setMenuAberto(!menuAberto)} className="p-2 text-gray-400">
+          <button onClick={() => setMenuAberto(!menuAberto)} className="p-2 text-gray-400 hover:text-gray-200">
             {menuAberto ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
         {menuAberto && (
-          <nav className="px-4 pb-4 space-y-1 border-t border-white/[0.06]">
+          <nav className="absolute top-16 left-0 right-0 bg-surface-sidebar border-b border-white/[0.06] px-4 pb-4 space-y-1 z-40">
             {NAV.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
@@ -118,7 +118,7 @@ export default function Layout() {
       </div>
 
       {/* Main Content */}
-      <main className={`flex-1 lg:ml-64 min-h-screen ${isFunil ? '' : 'p-4 lg:p-8'} pt-20 lg:pt-8`}>
+      <main className={`flex-1 lg:ml-56 w-full min-h-screen pt-16 lg:pt-0 ${isFunil ? '' : 'p-4 md:p-6 lg:p-8'}`}>
         <Outlet />
       </main>
     </div>
